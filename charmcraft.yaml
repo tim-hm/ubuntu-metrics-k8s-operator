@@ -3,9 +3,9 @@ type: charm
 title: Ubuntu Reportd
 summary: The ubuntu-reportd web service as a charmed k8s operator.
 description: |
-  Ubuntu-reportd is a web service for submitting ubuntu desktop installation metrics.
+  Ubuntu-reportd is the web service for user-submitted installation metrics.
 
-  This charm packages that service for operations within kubernetes.
+  This charm packages that service as a charmed operator targetting juju + kubernetes.
 
 bases:
   - build-on:
@@ -22,5 +22,5 @@ containers:
 resources:
   image:
     type: oci-image
-    description: OCI image for the 'some-container' container
+    description: OCI image for the ubuntu-reportd service
     upstream-source: ghcr.io/tim-hm/ubuntu-report:sha-69ce01e
