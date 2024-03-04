@@ -1,19 +1,22 @@
+title: Ubuntu Reportd
 name: ubuntu-reportd
 type: charm
-title: Ubuntu Reportd
 summary: The ubuntu-reportd web service as a charmed k8s operator.
 description: |
   Ubuntu-reportd is the web service for user-submitted installation metrics.
 
   This charm packages that service as a charmed operator targetting juju + kubernetes.
 
+assumes:
+  - juju >= 3.1
+
 bases:
   - build-on:
-    - name: ubuntu
-      channel: "22.04"
+      - name: ubuntu
+        channel: "22.04"
     run-on:
-    - name: ubuntu
-      channel: "22.04"
+      - name: ubuntu
+        channel: "22.04"
 
 containers:
   reportd:
@@ -23,4 +26,9 @@ resources:
   image:
     type: oci-image
     description: OCI image for the ubuntu-reportd service
-    upstream-source: ghcr.io/tim-hm/ubuntu-report:sha-69ce01e
+    upstream-source: ghcr.io/tim-hm/ubuntu-report:dev
+
+requires:
+  database:
+    interface: postgresql_client
+    limit: 1
