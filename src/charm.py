@@ -112,7 +112,7 @@ class UbuntuReportd(ops.CharmBase):
     def _try_fetch_db_relation(self) -> None:
         self.unit.status = ops.WaitingStatus("Fetch db relation")
         relations = self._db.fetch_relation_data()
-        logger.error(f"Got database relation data: {relations}")
+        logger.debug(f"Got database relation data: {relations}")
 
         for data in relations.values():
             if not data:
