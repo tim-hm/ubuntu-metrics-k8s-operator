@@ -91,8 +91,13 @@ class UbuntuReportd(ops.CharmBase):
 
             self._container.add_layer(name, layer, combine=True)
             self._container.replan()
-
             self.unit.open_port(protocol="tcp", port=port)
+
+            version = "unknown"
+            if self._container.can_connect():
+                version = workload.fetch_version()
+            self.unit.set_workload_version(version)
+
             self.unit.status = ops.ActiveStatus("🚀")
 
         except ops.pebble.ConnectionError as e:

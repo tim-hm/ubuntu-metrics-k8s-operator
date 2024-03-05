@@ -1,8 +1,13 @@
+import json
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+import requests
 from utils import get_or_fail
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -20,6 +25,21 @@ class Workload:
     db_port: int
     db_username: str
     db_password: str
+
+    def api_url(self, path="") -> str:
+        return f"http://localhost:{self.port}/{path}"
+
+    def fetch_version(self) -> str:
+        try:
+            response = requests.get(self.api_url("about"), timeout=10)
+            about = About(**response.json())
+            return about.version
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse response: {e}")
+            return "unknown"
+        except TypeError as e:
+            logger.warning(f"Failed to construct About: {e}")
+            return "unknown"
 
 
 class WorkloadState(Enum):
