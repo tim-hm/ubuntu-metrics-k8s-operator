@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class UbuntuReportd(ops.CharmBase):
     name = "reportd"
+    db_relation_name = "database"
 
     def __init__(self, *args) -> None:
         super().__init__(*args)
@@ -29,7 +30,7 @@ class UbuntuReportd(ops.CharmBase):
             WorkloadBuilder()
             .set_name(UbuntuReportd.name)
             .set_port(8080)
-            .set_db_relation_name("database")
+            .set_db_relation_name(UbuntuReportd.db_relation_name)
             .set_db_name(UbuntuReportd.name)
         )
 
