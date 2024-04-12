@@ -1,4 +1,2 @@
-# An Ubuntu Reportd charmed k8s operator
+# K8s operator for the Ubuntu Metrics service
 
-Charmhub package name: ubuntu-reportd
-More information: https://charmhub.io/ubuntu-reportd
