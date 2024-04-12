@@ -6,97 +6,131 @@ import logging
 from typing import TYPE_CHECKING
 
 import ops
-from entities import WorkloadBuilder
 from utils import get_or_fail, stringify
+from workload import WorkloadAgentBuilder, WorkloadAgentBuilderState
 
-# in development types via dev paths
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # development import paths for type checking
     from lib.charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
-else:  # runtime
-    from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires  # noqa: F401, I001
+    from lib.charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+    from lib.charms.loki_k8s.v0.loki_push_api import LogProxyConsumer
+    from lib.charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
+    from lib.charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer
 
+else:  # runtime import paths
+    from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires  # noqa: F401, I001
+    from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider  # noqa: F401, I001
+    from charms.loki_k8s.v0.loki_push_api import LogProxyConsumer  # noqa: F401, I001
+    from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider  # noqa: F401, I001
+    from charms.traefik_route_k8s.v0.traefik_route import TraefikRouteRequirer  # noqa: F401, I001
 
 logger = logging.getLogger(__name__)
 
 
-class UbuntuReportd(ops.CharmBase):
-    name = "reportd"
-    db_relation_name = "database"
-
+class Metrics(ops.CharmBase):
     def __init__(self, *args) -> None:
         super().__init__(*args)
 
-        self._builder = (
-            WorkloadBuilder()
-            .set_name(UbuntuReportd.name)
-            .set_port(8080)
-            .set_db_relation_name(UbuntuReportd.db_relation_name)
-            .set_db_name(UbuntuReportd.name)
-        )
+        builder = WorkloadAgentBuilder()
+        builder.set_env(self.config.get("env", ""))
 
-        self._container: ops.Container = self.unit.get_container(UbuntuReportd.name)
+        self._builder = builder
+        self._container: ops.Container = self.unit.get_container(builder.name)
+
+        # Inspired from https://github.com/canonical/grafana-k8s-operator/blob/main/src/charm.py#L177
+        self._ingress = TraefikRouteRequirer(
+            self,
+            self.model.get_relation(builder.ingress_relation_name),  # type: ignore
+            builder.ingress_relation_name,
+        )
 
         self._db = DatabaseRequires(
             self,
-            relation_name=get_or_fail(self._builder.db_relation_name),
-            database_name=get_or_fail(self._builder.db_name),
+            relation_name=get_or_fail(builder.db_relation_name),
+            database_name=get_or_fail(builder.db_name),
         )
 
+        self._configure_observability()
         self._register_events()
 
+    def _configure_observability(self) -> None:
+        """Observability is non-blocking."""
+        builder = self._builder
+        port = builder.port
+
+        self._prometheus_scraping = MetricsEndpointProvider(
+            self,
+            relation_name=builder.metrics_relation_name,
+            jobs=[{"static_configs": [{"targets": [f"*:{port}"]}]}],
+            refresh_event=self.on.config_changed,
+        )
+
+        self._logging = LogProxyConsumer(
+            self,
+            relation_name=builder.log_relation_name,
+            log_files=[builder.log_file],
+        )
+
+        self._grafana_dashboards = GrafanaDashboardProvider(
+            self, relation_name=builder.grafana_relation_name
+        )
+
     def _register_events(self) -> None:
-        self.framework.observe(self.on.reportd_pebble_ready, self._try_start)
-        self.framework.observe(self._db.on.database_created, self._try_start)
-        self.framework.observe(self._db.on.endpoints_changed, self._try_start)
-        self.framework.observe(self.on.database_relation_broken, self._on_db_relation_broken)
+        observe = self.framework.observe
 
-    def _try_start(self, _: ops.EventBase) -> None:
-        self.unit.status = ops.WaitingStatus("Checking preconditions ...")
+        observe(self.on.config_changed, self._on_config_changed)
 
-        self._try_fetch_db_relation()
+        observe(self.on.metrics_pebble_ready, self._try_start)
 
-        if not self._builder.check_is_ready():
-            self.unit.status = ops.WaitingStatus("Preconditions unsatisfied")
-            logger.debug(stringify(self._builder))
+        observe(self._db.on.database_created, self._try_start)
+        observe(self._db.on.endpoints_changed, self._try_start)
+        observe(self.on.database_relation_broken, self._on_db_relation_broken)
+
+        observe(self.on.ingress_relation_joined, self._try_start)
+        observe(self._ingress.on.ready, self._try_start)
+        observe(self.on.leader_elected, self._try_start)
+        observe(self.on.config_changed, self._try_start)
+
+    def _on_config_changed(self, event: ops.ConfigChangedEvent):
+        env = self.config.get("env")
+
+        if not env:
+            self.unit.status = ops.BlockedStatus("Charm's env unset. Must be prod, stg, or local")
             return
 
-        workload = self._builder.build()
+        logger.info(f"Environment set to: {env}")
+        self._builder.set_env(env)
+        self._try_start(event)
+
+    def _try_start(self, event: ops.EventBase) -> None:
+        self.unit.status = ops.WaitingStatus("Trying to start workload")
+
+        if not self._container.can_connect():
+            self.unit.status = ops.WaitingStatus("Cannot connect to container")
+            return
+
+        self._try_fetch_db_relation()
+        self._try_configure_ingress(event)
+
+        builder = self._builder
+        builder_state = builder.get_state()
+
+        if not builder_state == WorkloadAgentBuilderState.Ready:
+            self.unit.status = ops.WaitingStatus(builder_state.name)
+            logger.debug(stringify(builder))
+            return
+
+        workload_agent = builder.build()
 
         try:
-            name = workload.name
-            port = workload.port
+            ingress_config = workload_agent.create_ingress_config
+            self._ingress.submit_to_traefik(ingress_config)
 
-            command = " ".join(["/app/ubuntu-reportd", "-vvv"])
-            environment: dict[str, str] = {
-                "UBUNTU-REPORTD_SERVERPORT": str(port),
-                "DB_HOST": workload.db_host,
-                "DB_PORT": str(workload.db_port),
-                "DB_USERNAME": workload.db_username,
-                "DB_PASSWORD": workload.db_password,
-            }
-
-            layer = ops.pebble.Layer(
-                {
-                    "summary": "reportd base layer definition",
-                    "services": {
-                        name: {
-                            "override": "replace",
-                            "summary": f"{name} pebble config layer",
-                            "startup": "enabled",
-                            "command": command,
-                            "environment": environment,
-                        }
-                    },
-                }
-            )
-
-            self._container.add_layer(name, layer, combine=True)
+            layer = workload_agent.create_pebble_layer
+            self._container.add_layer(workload_agent.name, layer, combine=True)
             self._container.replan()
-            self.unit.open_port(protocol="tcp", port=port)
+            self.unit.open_port(protocol="tcp", port=workload_agent.port)
 
-            version = "unknown"
-            if self._container.can_connect():
-                version = workload.fetch_version()
+            version = workload_agent.fetch_version()
             self.unit.set_workload_version(version)
 
             self.unit.status = ops.ActiveStatus("🚀")
@@ -109,10 +143,22 @@ class UbuntuReportd(ops.CharmBase):
             logger.error(f"Pebble replan failed: {e}")
             self.unit.status = ops.BlockedStatus("Failed to configure container")
 
+    def _try_configure_ingress(self, event: ops.EventBase) -> None:
+        if not self.unit.is_leader():
+            return
+
+        # When self._ingress._relation is first set in __init__ it too early in
+        # the charm's life. So, when we capture the relation from the event.
+        if (
+            isinstance(event, ops.RelationJoinedEvent)
+            and event.relation.name == self._builder.ingress_relation_name
+        ):
+            self._ingress._relation = event.relation
+
+        self._builder.set_ingress_ready(self._ingress.is_ready())
+
     def _try_fetch_db_relation(self) -> None:
-        self.unit.status = ops.WaitingStatus("Fetch db relation")
         relations = self._db.fetch_relation_data()
-        logger.debug(f"Got database relation data: {relations}")
 
         for data in relations.values():
             if not data:
@@ -131,4 +177,4 @@ class UbuntuReportd(ops.CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    ops.main(UbuntuReportd)  # type: ignore
+    ops.main(Metrics)  # type: ignore

@@ -9,6 +9,12 @@ def get_or_fail(value: Optional[T], name: str = "unknown") -> T:
     return value
 
 
+def get_or_default(value: Optional[T], default: T) -> T:
+    if value is None:
+        return default
+    return value
+
+
 def stringify(instance: Any) -> str:
     class_name = instance.__class__.__name__
     properties_str = ", ".join(f"{attr}={value}" for attr, value in instance.__dict__.items())
