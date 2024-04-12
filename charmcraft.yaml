@@ -16,15 +16,19 @@ bases:
       - name: ubuntu
         channel: "22.04"
 
-containers:
-  metrics:
-    resource: image
-
 config:
   options:
     env:
       description: The charm's environment. One of prod, stg, or local
       type: string
+    log_level:
+      default: info
+      description: Set the workload's logging verbosity. One of debug or info.
+      type: string
+
+containers:
+  workload:
+    resource: image
 
 resources:
   image:

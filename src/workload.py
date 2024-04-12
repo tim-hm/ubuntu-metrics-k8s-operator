@@ -6,30 +6,10 @@ from typing import Optional
 
 import ops
 import requests
+from entities import About, LogLevel, WorkloadEnv
 from utils import get_or_fail
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class About:
-    version: str
-
-
-class WorkloadEnv(Enum):
-    Prod = "prod"
-    Stg = "stg"
-    Local = "local"
-
-    @classmethod
-    def try_from_string(cls, value: str) -> Optional["WorkloadEnv"]:
-        value = value.lower()
-
-        for member in cls:
-            if member.value == value:
-                return member
-
-        return None
 
 
 class WorkloadAgentBuilderState(Enum):
@@ -46,6 +26,7 @@ class WorkloadAgent:
     model: str
     name: str
     port: int
+    log_level: LogLevel
 
     db_name: str
     db_relation_name: str
@@ -70,7 +51,7 @@ class WorkloadAgent:
             self.name: {
                 "rule": f"Host(`{self.external_hostname}`)",
                 "service": f"{self.name}_service",
-                "entryPoints": ["websecure"],
+                "entryPoints": ["web", "websecure"],
             }
         }
 
@@ -88,17 +69,17 @@ class WorkloadAgent:
 
     @property
     def create_pebble_layer(self) -> ops.pebble.Layer:
+        db_connection_string = f"postgresql://{self.db_username}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+
         environment: dict[str, str] = {
             "UBUNTU-REPORTD_SERVERPORT": str(self.port),
-            "DB_HOST": self.db_host,
-            "DB_PORT": str(self.db_port),
-            "DB_USERNAME": self.db_username,
-            "DB_PASSWORD": self.db_password,
+            "LOG_LEVEL": self.log_level.value,
+            "DB_URI": db_connection_string,
         }
 
         layer = ops.pebble.Layer(
             {
-                "summary": "reportd base layer definition",
+                "summary": "ubuntu-metrics base layer definition",
                 "services": {
                     self.name: {
                         "override": "replace",
@@ -154,10 +135,16 @@ class WorkloadAgentBuilder:
         self.ingress_ready = False
 
         """These options are to wire up the workload to the observability stack."""
-        self.log_file = "/var/log/charmed_metrics.log"
+        self.log_level = LogLevel.Info
+        self.log_file = "/var/log/workload.log"
         self.log_relation_name = "log-proxy"
         self.grafana_relation_name = "grafana-dashboard"
         self.metrics_relation_name = "metrics-endpoint"
+
+    def load_config_values(self, config: ops.ConfigData) -> "WorkloadAgentBuilder":
+        self.set_env(config.get("env", ""))
+        self.set_log_level(config.get("log_level", ""))
+        return self
 
     def set_env(self, value: str) -> "WorkloadAgentBuilder":
         self.env = WorkloadEnv.try_from_string(value)
@@ -181,6 +168,10 @@ class WorkloadAgentBuilder:
 
     def set_ingress_ready(self, value: bool = True) -> "WorkloadAgentBuilder":
         self.ingress_ready = value
+        return self
+
+    def set_log_level(self, value: str) -> "WorkloadAgentBuilder":
+        self.log_level = LogLevel.try_from_string(value)
         return self
 
     def get_state(self) -> WorkloadAgentBuilderState:
@@ -211,6 +202,7 @@ class WorkloadAgentBuilder:
             model=self.model,
             name=self.name,
             port=self.port,
+            log_level=self.log_level,
             db_name=self.db_name,
             db_relation_name=self.db_relation_name,
             db_host=get_or_fail(self.db_host, "db_host"),

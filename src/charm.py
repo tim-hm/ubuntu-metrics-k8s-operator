@@ -26,15 +26,15 @@ else:  # runtime import paths
 logger = logging.getLogger(__name__)
 
 
-class Metrics(ops.CharmBase):
+class UbuntuMetrics(ops.CharmBase):
     def __init__(self, *args) -> None:
         super().__init__(*args)
 
         builder = WorkloadAgentBuilder()
-        builder.set_env(self.config.get("env", ""))
+        builder.load_config_values(self.config)
 
         self._builder = builder
-        self._container: ops.Container = self.unit.get_container(builder.name)
+        self._container: ops.Container = self.unit.get_container("workload")
 
         # Inspired from https://github.com/canonical/grafana-k8s-operator/blob/main/src/charm.py#L177
         self._ingress = TraefikRouteRequirer(
@@ -79,7 +79,7 @@ class Metrics(ops.CharmBase):
 
         observe(self.on.config_changed, self._on_config_changed)
 
-        observe(self.on.metrics_pebble_ready, self._try_start)
+        observe(self.on.workload_pebble_ready, self._try_start)
 
         observe(self._db.on.database_created, self._try_start)
         observe(self._db.on.endpoints_changed, self._try_start)
@@ -177,4 +177,4 @@ class Metrics(ops.CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    ops.main(Metrics)  # type: ignore
+    ops.main(UbuntuMetrics)  # type: ignore
