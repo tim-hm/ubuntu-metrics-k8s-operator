@@ -1,3 +1,13 @@
+.vscode
+.idea
+/target
+.env
+.env_test
+.DS_STORE
+
+*.rock
+*.nix
+
 venv/
 build/
 *.charm
@@ -5,6 +15,4 @@ build/
 .coverage
 __pycache__/
 *.py[cod]
-.idea
-.vscode/
 .mypy_cache
