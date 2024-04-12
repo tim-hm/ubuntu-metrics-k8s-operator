@@ -1,11 +1,9 @@
-title: Ubuntu Reportd
-name: ubuntu-reportd
+title: Ubuntu Metrics Service
+name: ubuntu-metrics
 type: charm
-summary: The ubuntu-reportd web service as a charmed k8s operator.
+summary: The ubuntu metrics service as a charmed k8s operator.
 description: |
-  Ubuntu-reportd is the web service for user-submitted installation metrics.
-
-  This charm packages that service as a charmed operator targetting juju + kubernetes.
+  This k8s operator charm wraps the service that collects opted-in ubuntu desktop installation metrics.
 
 assumes:
   - juju >= 3.1
@@ -19,16 +17,34 @@ bases:
         channel: "22.04"
 
 containers:
-  reportd:
+  metrics:
     resource: image
+
+config:
+  options:
+    env:
+      description: The charm's environment. One of prod, stg, or local
+      type: string
 
 resources:
   image:
     type: oci-image
-    description: OCI image for the ubuntu-reportd service
-    upstream-source: ghcr.io/tim-hm/ubuntu-report:dev
+    description: OCI image for the metrics service
+    upstream-source: ghcr.io/tim-hm/ubuntu-report:sha-b93707a
 
 requires:
   database:
     interface: postgresql_client
     limit: 1
+  log-proxy:
+    interface: loki_push_api
+    limit: 1
+  ingress:
+    interface: traefik_route
+    limit: 1
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+  grafana-dashboard:
+    interface: grafana_dashboard
