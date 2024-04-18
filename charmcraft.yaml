@@ -34,7 +34,7 @@ resources:
   image:
     type: oci-image
     description: OCI image for the metrics service
-    upstream-source: ghcr.io/tim-hm/ubuntu-report:sha-b93707a
+    upstream-source: ghcr.io/tim-hm/ubuntu-report:sha-2412f7e
 
 requires:
   database:
