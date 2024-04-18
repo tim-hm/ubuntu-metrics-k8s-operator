@@ -39,7 +39,7 @@ class WorkloadAgent:
     def external_hostname(self) -> str:
         switch = {
             WorkloadEnv.Prod: "metrics.ubuntu.com",
-            WorkloadEnv.Stg: "stg.metrics.ubuntu.com",
+            WorkloadEnv.Stg: "metrics.stg.ubuntu.com",
             WorkloadEnv.Local: "metrics.ubuntu.local",
         }
 
